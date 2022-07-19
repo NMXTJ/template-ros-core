@@ -1,4 +1,4 @@
 
 def solution(obs):
     print(obs.shape)
-    return [1, 1]
+    return [0.5, 0]
