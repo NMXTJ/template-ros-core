@@ -1,61 +1,50 @@
-#!/usr/bin/env python3
-import sys
-import rospy
-from duckietown.dtros import DTROS, NodeType
-from duckietown_msgs.msg import Twist2DStamped
-from sensor_msgs.msg import CompressedImage
-from cv_bridge import CvBridge
-from solution import solution
+# Импорт базового класса для всех gym_duckietown решений:
+from gym_duckietown.tasks.task_solution import TaskSolution
+# Импорт библиотеки компьютерной математики:
+import numpy as np
+# Импорт библиотеки для компьютерного зрения:
+import cv2
 
+yellow_lower = np.array([20, 100, 100])
+yellow_upper = np.array([30, 255, 255])
+# Каждое решение -- класс-наследник TaskSolution
+class DontCrushDuckieTaskSolution(TaskSolution):
+    # Стандартный конструктор
+    def __init__(self, generated_task):
+        super().__init__(generated_task)
 
-class MyNode(DTROS):
+    # Именно данный метод содержит код, который будет выполнен на роботе
+    def solve(self):
+        # Через объект env решение сможет взаимодействовать с внешним миром
+        env = self.generated_task['env']
+        # Метод step принимает линейную и угловую скорость робота и возвращает obs (observation), содержащий картинку с камеры робота.
+        # Так как мы никуда не движемся, следующей строчкой мы получает картинку в начальном положении робота
+        obs, _, _, _ = env.step([0, 0])
 
-    def __init__(self, node_name):
-        super(MyNode, self).__init__(node_name=node_name, node_type=NodeType.DEBUG)
-        self.pub = rospy.Publisher("~car_cmd", Twist2DStamped, queue_size=1)
-        self.bridge = CvBridge()
-        self.cur_img = None
-        self.sub_image = rospy.Subscriber(
-            "/autobot10/camera_node/image/compressed",
-            #"~image",
-            CompressedImage,
-            self.action,
-            queue_size=1
-        )
+        # Конвертация изображения в формат RGB для более удобной работы:
+        img = cv2.cvtColor(np.ascontiguousarray(obs), cv2.COLOR_BGR2RGB)
 
-    def run(self):
-        pass
+        # Теперь мы можем обработать изображение. Например, поискать на нем уточек
 
-    def action(self, image_msg):
-        try:
-            image = self.bridge.compressed_imgmsg_to_cv2(image_msg)
-            self.cur_img = image
-            
-        except ValueError as e:
-            self.logerr('Could not decode image: %s' % e)
-            return
-        vel, omega = solution(self.cur_img)
-        msg = Twist2DStamped()
-        msg.v = vel
-        msg.omega = omega
-        self.pub.publish(msg)
-        sys.stdout.flush()
-   
+        # Условие, истинность которого обозначает продолжение движения прямо:
+        condition = True
+        while condition:
+            # Даем команду роботу ехать прямо.
+            # Действие выполняется квант времени и метод возвращает новое изображение с камеры робота
+            obs, _, _, _ = env.step([1, 0])
+            img = cv2.cvtColor(np.ascontiguousarray(obs), cv2.COLOR_RGB2HSV)
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    def on_shutdown(self):
-        """Shutdown procedure.
-        Publishes a zero velocity command at shutdown."""
-        msg = Twist2DStamped()
-        msg.v = 0.0
-        msg.omega = 0.0
-        self.pub.publish(msg)
+            mask_yellow = cv2.inRange(hsv, yellow_lower, yellow_upper)
+            yellow_ratio = (cv2.countNonZero(mask_yellow)) / (img.size / 3)
+            res = np.round(yellow_ratio * 100, 2)
 
-        super(MyNode, self).on_shutdown()
-
-if __name__ == '__main__':
-    # create the node
-    node = MyNode(node_name='circle_drive_node')
-    # run node
-    node.run()
-    # keep spinning
-    rospy.spin()
+            if res > 6.5:
+                #env.step([0, 0])
+                condition = False
+            # Снова конвертируем изображе
+            # ние и как-то его обрабатываем. Например, ищем уточку.
+            # Определяем пора ли остановиться
+            # condition = True
+            # Метод симулятора, который решение вызывает после каждой итерации обработки очередного кадра
+            env.render()
